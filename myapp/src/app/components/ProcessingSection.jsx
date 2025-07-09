@@ -1,9 +1,19 @@
-// app/components/ProcessingSection.jsx
-
-import React, { useRef, useState, useCallback } from 'react';
-import { 
-  Play, Loader2, Download, Type, Palette, Move, Trash2, Eye, EyeOff 
+import React, { useRef, useState, useCallback, useEffect } from 'react';
+import {
+  Play,
+  Loader2,
+  Download,
+  Type,
+  Palette,
+  Move,
+  Trash2,
+  Eye,
+  EyeOff,
+  Layers,
+  Camera,
 } from 'lucide-react';
+import { getBodyPixNet, blurBackgroundImage } from '../utils/blurBackground';
+
 
 export default function ProcessingSection({
   uploadedImage,
@@ -17,79 +27,123 @@ export default function ProcessingSection({
   onAddTextPosition,
   onUpdateTextPosition,
   onDeleteTextPosition,
-  onSelectText
+  onSelectText,
 }) {
   const imageRef = useRef(null);
   const canvasRef = useRef(null);
+  const previewCanvasRef = useRef(null);
   const [isPlacingText, setIsPlacingText] = useState(false);
   const [processedImageUrl, setProcessedImageUrl] = useState(null);
+  const [backgroundBlur, setBackgroundBlur] = useState(8);
+  const [portraitMode, setPortraitMode] = useState(true);
+  const [bodyPixNet, setBodyPixNet] = useState(null);
 
-  const renderTextOnCanvas = useCallback(() => {
-    if (!uploadedImage || !canvasRef.current || !imageRef.current) return;
-    
-    const canvas = canvasRef.current;
+  useEffect(() => {
+    getBodyPixNet().then(setBodyPixNet).catch(console.error);
+  }, []);
+
+  const renderTextOnCanvas = useCallback(async () => {
+    if (
+      !uploadedImage ||
+      !previewCanvasRef.current ||
+      !imageRef.current ||
+      !canvasRef.current ||
+      !bodyPixNet
+    )
+      return;
+
+    const canvas = previewCanvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const img = new Image();
-    img.onload = () => {
-      // Set canvas to match image dimensions
+    img.crossOrigin = 'anonymous';
+
+    img.onload = async () => {
       canvas.width = img.width;
       canvas.height = img.height;
 
-      // Draw original image
-      ctx.drawImage(img, 0, 0);
+      const displayRect = imageRef.current?.getBoundingClientRect();
+      if (displayRect) {
+        canvas.style.width = `${displayRect.width}px`;
+        canvas.style.height = `${displayRect.height}px`;
+      }
 
-      // Draw all text positions
+      let backgroundUrl = uploadedImage;
+
+      if (backgroundBlur > 0) {
+        const hiddenCanvas = canvasRef.current;
+        hiddenCanvas.width = img.width;
+        hiddenCanvas.height = img.height;
+        await blurBackgroundImage(img, hiddenCanvas, backgroundBlur, bodyPixNet);
+        backgroundUrl = hiddenCanvas.toDataURL();
+      }
+
+      const blurredImg = new Image();
+      blurredImg.crossOrigin = 'anonymous';
+      blurredImg.src = backgroundUrl;
+      await new Promise((resolve) => (blurredImg.onload = resolve));
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(blurredImg, 0, 0);
+
       textPositions.forEach((position) => {
         const x = (position.x / 100) * canvas.width;
         const y = (position.y / 100) * canvas.height;
 
         ctx.save();
-
-        // Set font and color
-        ctx.font = `bold ${position.fontSize}px Arial, sans-serif`;
+        const massiveSize = Math.max(position.fontSize * (canvas.width / 400), 80);
+        ctx.font = `900 ${massiveSize}px "Arial Black", sans-serif`;
         ctx.fillStyle = position.color;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Background integration style
         if (position.behindObject) {
           ctx.globalCompositeOperation = 'multiply';
-          ctx.globalAlpha = 0.7;
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-          ctx.shadowBlur = 10;
-          ctx.shadowOffsetX = 2;
-          ctx.shadowOffsetY = 2;
-        } else {
-          ctx.globalAlpha = 1;
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-          ctx.shadowBlur = 4;
-          ctx.shadowOffsetX = 2;
-          ctx.shadowOffsetY = 2;
-        }
+          ctx.globalAlpha = 0.85;
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+          ctx.shadowBlur = massiveSize * 0.12;
+          ctx.shadowOffsetX = massiveSize * 0.06;
+          ctx.shadowOffsetY = massiveSize * 0.06;
+          ctx.fillText(position.text, x, y);
 
-        // Draw main text
-        ctx.fillText(position.text, x, y);
-
-        // Optional overlay blending for background effect
-        if (position.behindObject) {
           ctx.globalCompositeOperation = 'overlay';
-          ctx.globalAlpha = 0.3;
+          ctx.globalAlpha = 0.65;
+          ctx.shadowBlur = massiveSize * 0.08;
+          ctx.fillText(position.text, x, y);
+
+          ctx.globalCompositeOperation = 'soft-light';
+          ctx.globalAlpha = 0.55;
+          ctx.shadowBlur = massiveSize * 0.06;
+          ctx.fillText(position.text, x, y);
+        } else {
+          ctx.globalAlpha = 0.98;
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+          ctx.shadowBlur = massiveSize * 0.1;
+          ctx.shadowOffsetX = massiveSize * 0.05;
+          ctx.shadowOffsetY = massiveSize * 0.05;
+
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+          ctx.lineWidth = massiveSize * 0.025;
+          ctx.strokeText(position.text, x, y);
+
+          ctx.fillText(position.text, x, y);
+
+          ctx.globalCompositeOperation = 'overlay';
+          ctx.globalAlpha = 0.4;
+          ctx.fillStyle = '#ffffff';
           ctx.fillText(position.text, x, y);
         }
-
         ctx.restore();
       });
 
-      // Generate final image URL
-      setProcessedImageUrl(canvas.toDataURL('image/png'));
+      setProcessedImageUrl(canvas.toDataURL('image/png', 1.0));
     };
 
     img.src = uploadedImage;
-  }, [uploadedImage, textPositions]);
+  }, [uploadedImage, textPositions, backgroundBlur, bodyPixNet]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     renderTextOnCanvas();
   }, [renderTextOnCanvas]);
 
@@ -108,63 +162,127 @@ export default function ProcessingSection({
     if (!processedImageUrl) return;
 
     const link = document.createElement('a');
-    link.download = 'text-behind-image.png';
+    link.download = `portrait-text-background-${Date.now()}.png`;
     link.href = processedImageUrl;
     link.click();
   };
 
-  const selectedText = textPositions.find(pos => pos.id === selectedTextId);
+  const selectedText = textPositions.find((pos) => pos.id === selectedTextId);
+
+  const increaseFontSize = () => {
+    if (selectedText) {
+      onUpdateTextPosition(selectedText.id, {
+        fontSize: Math.min(selectedText.fontSize + 12, 200),
+      });
+    }
+  };
+
+  const decreaseFontSize = () => {
+    if (selectedText) {
+      onUpdateTextPosition(selectedText.id, {
+        fontSize: Math.max(selectedText.fontSize - 12, 24),
+      });
+    }
+  };
 
   return (
     <div className="space-y-6">
-      {/* Input Section */}
       <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20">
         <h2 className="text-2xl font-bold text-white mb-6 flex items-center">
-          <Type className="w-6 h-6 mr-2" />
-          Text Background Integration
+          <Camera className="w-6 h-6 mr-2" /> Portrait Text with Background Blur
         </h2>
-
-        <div className="space-y-4">
+        <div className="space-y-6">
+          <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-xl p-4 border border-blue-500/30">
+            <h3 className="text-white font-bold mb-4 flex items-center">
+              <Layers className="w-5 h-5 mr-2" /> Background Effects
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-2 font-medium">Portrait Mode</label>
+                <button
+                  onClick={() => setPortraitMode(!portraitMode)}
+                  className={`w-full flex items-center justify-center px-4 py-3 rounded-xl font-bold transition-all duration-300 ${
+                    portraitMode
+                      ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-lg'
+                      : 'bg-gradient-to-r from-gray-500 to-slate-500 text-white shadow-lg'
+                  }`}
+                >
+                  <Camera className="w-5 h-5 mr-2" />
+                  {portraitMode ? 'PORTRAIT ON' : 'PORTRAIT OFF'}
+                </button>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-2 font-medium">
+                  Background Blur: {backgroundBlur}px
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="20"
+                  step="1"
+                  value={backgroundBlur}
+                  onChange={(e) => setBackgroundBlur(parseInt(e.target.value))}
+                  className="w-full h-3 bg-white/20 rounded-lg appearance-none cursor-pointer"
+                />
+                <div className="flex justify-between text-xs text-gray-400 mt-1">
+                  <span>Sharp</span>
+                  <span>Very Blurred</span>
+                </div>
+              </div>
+            </div>
+            {portraitMode && (
+              <div className="mt-4 p-3 bg-green-500/10 rounded-lg border border-green-500/20">
+                <p className="text-green-400 text-sm flex items-center">
+                  <Camera className="w-4 h-4 mr-2" />
+                  Portrait mode creates a focused center with blurred edges
+                </p>
+              </div>
+            )}
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
-              Enter text to integrate into image background
+              Enter text for background integration with blur effect
             </label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={textPrompt}
                 onChange={(e) => onPromptChange(e.target.value)}
-                placeholder="Enter your text here..."
+                placeholder="Enter large text..."
                 className="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
               <button
                 onClick={() => setIsPlacingText(!isPlacingText)}
                 disabled={!textPrompt.trim() || !uploadedImage}
-                className={`px-4 py-3 rounded-xl font-medium transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center ${
+                className={`px-6 py-3 rounded-xl font-bold transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center ${
                   isPlacingText ? 'bg-green-500 text-white' : 'bg-purple-500 text-white hover:bg-purple-600'
                 }`}
               >
                 {isPlacingText ? (
                   <>
-                    <Move className="w-4 h-4 mr-1" />
+                    <Move className="w-5 h-5 mr-2" />
                     Click Image
                   </>
                 ) : (
                   <>
-                    <Type className="w-4 h-4 mr-1" />
+                    <Camera className="w-5 h-5 mr-2" />
                     Place Text
                   </>
                 )}
               </button>
             </div>
             {isPlacingText && (
-              <p className="text-sm text-green-400 mt-2">
-                Click on the image where you want to integrate the text into the background
-              </p>
+              <div className="mt-3 p-4 bg-green-500/10 rounded-lg border border-green-500/30">
+                <p className="text-green-400 font-medium flex items-center">
+                  <Camera className="w-5 h-5 mr-2" />
+                  Click anywhere to place text with background blur effect
+                </p>
+                <p className="text-green-300 text-sm mt-1">
+                  Text will integrate naturally with the blurred background
+                </p>
+              </div>
             )}
           </div>
-
-          {/* Selected Text Settings */}
           {selectedText && (
             <div className="bg-white/5 rounded-xl p-4 border border-white/10">
               <h3 className="text-white font-medium mb-3 flex items-center">
@@ -176,8 +294,8 @@ export default function ProcessingSection({
                   <label className="block text-xs text-gray-400 mb-1">Font Size</label>
                   <input
                     type="range"
-                    min="12"
-                    max="72"
+                    min="24"
+                    max="200"
                     value={selectedText.fontSize}
                     onChange={(e) =>
                       onUpdateTextPosition(selectedText.id, {
@@ -198,7 +316,7 @@ export default function ProcessingSection({
                         color: e.target.value,
                       })
                     }
-                    className="w-full h-8 rounded border border-white/20"
+                    className="w-full h-8 rounded border border-white/20 bg-white/10"
                   />
                 </div>
               </div>
@@ -215,11 +333,7 @@ export default function ProcessingSection({
                       : 'bg-gray-500/20 text-gray-400 border border-gray-500/40'
                   }`}
                 >
-                  {selectedText.behindObject ? (
-                    <Eye className="w-3 h-3 mr-1" />
-                  ) : (
-                    <EyeOff className="w-3 h-3 mr-1" />
-                  )}
+                  {selectedText.behindObject ? <Eye className="w-3 h-3 mr-1" /> : <EyeOff className="w-3 h-3 mr-1" />}
                   {selectedText.behindObject ? 'Background Integration' : 'Text Overlay'}
                 </button>
                 <button
@@ -232,20 +346,14 @@ export default function ProcessingSection({
               </div>
               {selectedText.behindObject && (
                 <div className="mt-3 p-2 bg-green-500/10 rounded-lg border border-green-500/20">
-                  <p className="text-xs text-green-400">
-                    ✓ Text will be integrated into the image background using blend modes and opacity effects
-                  </p>
+                  <p className="text-xs text-green-400">✓ Text integrates with the blurred background using blending effects</p>
                 </div>
               )}
             </div>
           )}
-
-          {/* Text Positions List */}
           {textPositions.length > 0 && (
             <div className="bg-white/5 rounded-xl p-4 border border-white/10">
-              <h3 className="text-white font-medium mb-3">
-                Text Elements ({textPositions.length})
-              </h3>
+              <h3 className="text-white font-medium mb-3">Text Elements ({textPositions.length})</h3>
               <div className="space-y-2 max-h-32 overflow-y-auto">
                 {textPositions.map((position) => (
                   <div
@@ -261,13 +369,9 @@ export default function ProcessingSection({
                       <span className="text-white text-sm truncate">{position.text}</span>
                       <div className="flex items-center space-x-2">
                         {position.behindObject ? (
-                          <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
-                            Background
-                          </span>
+                          <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">Background</span>
                         ) : (
-                          <span className="text-xs bg-gray-500/20 text-gray-400 px-2 py-1 rounded">
-                            Overlay
-                          </span>
+                          <span className="text-xs bg-gray-500/20 text-gray-400 px-2 py-1 rounded">Overlay</span>
                         )}
                         <span className="text-xs text-gray-400">{position.fontSize}px</span>
                       </div>
@@ -277,8 +381,6 @@ export default function ProcessingSection({
               </div>
             </div>
           )}
-
-          {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={onProcess}
@@ -293,109 +395,62 @@ export default function ProcessingSection({
               ) : (
                 <>
                   <Play className="w-5 h-5 mr-2" />
-                  Generate Final Image ({textPositions.length} texts)
+                  Generate
                 </>
               )}
             </button>
             <button
               onClick={handleDownloadImage}
-              disabled={!processedImageUrl || isProcessing}
-              className="px-6 py-3 bg-white/10 border border-white/20 rounded-xl text-white hover:bg-white/20 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+              disabled={!processedImageUrl}
+              className="flex-1 border border-white/20 text-white px-6 py-3 rounded-xl font-semibold hover:bg-white/10 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             >
               <Download className="w-5 h-5 mr-2" />
-              Download
+              Download Image
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* Hidden Canvas for Rendering */}
-      <canvas ref={canvasRef} className="hidden" />
-
-      {/* Preview Section */}
-      <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20">
-        <h3 className="text-lg font-semibold text-white mb-4">
-          Live Preview with Background Integration
-        </h3>
-        <div className="aspect-video bg-gray-800/50 rounded-xl border border-white/20 flex items-center justify-center relative overflow-hidden">
-          {uploadedImage ? (
-            <div className="relative w-full h-full">
-              {/* Original Image */}
-              <img
-                ref={imageRef}
-                src={uploadedImage}
-                alt="Preview"
-                className={`w-full h-full object-cover rounded-xl ${
-                  isPlacingText ? 'cursor-crosshair' : 'cursor-default'
-                }`}
-                onClick={handleImageClick}
-              />
-              {/* Processed Image Overlay */}
-              {processedImageUrl && textPositions.length > 0 && (
-                <img
-                  src={processedImageUrl}
-                  alt="Processed Preview"
-                  className="absolute inset-0 w-full h-full object-cover rounded-xl opacity-90"
-                />
-              )}
-              {/* Text Position Markers */}
-              {textPositions.map((position) => (
-                <div
-                  key={position.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectText(position.id);
-                  }}
-                  className={`absolute cursor-pointer border-2 border-dashed rounded px-2 py-1 transition-all ${
-                    selectedTextId === position.id
-                      ? 'border-purple-400 bg-purple-400/20'
-                      : 'border-white/40 bg-black/20'
-                  }`}
-                  style={{
-                    left: `${position.x}%`,
-                    top: `${position.y}%`,
-                    transform: 'translate(-50%, -50%)',
-                  }}
-                >
-                  <span className="text-xs text-white font-medium">
-                    {position.text} ({position.behindObject ? 'BG' : 'OV'})
-                  </span>
-                </div>
-              ))}
-              {/* Processing Overlay */}
-              {isProcessing && (
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-xl">
-                  <div className="text-center">
-                    <Loader2 className="w-8 h-8 text-white animate-spin mx-auto mb-2" />
-                    <p className="text-white text-sm">
-                      Integrating text into background with {selectedModel}...
-                    </p>
-                  </div>
-                </div>
-              )}
-              {/* Placing Mode Overlay */}
-              {isPlacingText && (
-                <div className="absolute inset-0 bg-purple-500/10 rounded-xl flex items-center justify-center">
-                  <div className="bg-black/70 text-white px-4 py-2 rounded-lg text-sm">
-                    Click to place: "{textPrompt}"
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-center">
-              <Type className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-400">Upload an image to start integrating text into background</p>
+          {selectedText && (
+            <div className="flex gap-2 justify-center mt-4">
+              <button
+                onClick={decreaseFontSize}
+                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-xl font-bold transition-colors"
+              >
+                <Minus className="w-5 h-5" />
+              </button>
+              <button
+                onClick={increaseFontSize}
+                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-xl font-bold transition-colors"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
             </div>
           )}
         </div>
-        {/* Success Message */}
-        {processedImageUrl && (
-          <div className="mt-4 p-3 bg-green-500/10 rounded-lg border border-green-500/20">
-            <p className="text-green-400 text-sm flex items-center">
-              <Eye className="w-4 h-4 mr-2" />
-              Text has been integrated into the image background using canvas processing
-            </p>
+      </div>
+      <canvas ref={canvasRef} className="hidden" />
+      <div className="aspect-video bg-gray-800/50 rounded-xl border border-white/20 flex items-center justify-center relative overflow-hidden">
+        {uploadedImage ? (
+          <div className="relative w-full h-full">
+            <img
+              ref={imageRef}
+              src={uploadedImage}
+              alt="Preview"
+              className={`w-full h-full object-cover rounded-xl ${isPlacingText ? 'cursor-crosshair' : 'cursor-default'}`}
+              onClick={handleImageClick}
+            />
+            <canvas
+              ref={previewCanvasRef}
+              className="absolute inset-0 w-full h-full rounded-xl pointer-events-none"
+            />
+            {isProcessing && (
+              <div className="absolute inset-0 bg-black/50 rounded-xl flex items-center justify-center">
+                <Loader2 className="w-12 h-12 text-white animate-spin" />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center p-12">
+            <Type className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <p className="text-gray-400">Upload an image to start integrating text into background</p>
           </div>
         )}
       </div>
