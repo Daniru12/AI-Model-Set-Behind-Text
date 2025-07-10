@@ -1,5 +1,4 @@
 // app/page.jsx
-
 'use client';
 
 import React, { useState } from 'react';
@@ -47,8 +46,7 @@ export default function HomePage() {
   const handleUpdateTextPosition = (id, updates) => {
     setTextPositions((prev) =>
       prev.map((pos) => (pos.id === id ? { ...pos, ...updates } : pos)
-    )
-  );
+    ));
   };
 
   const handleDeleteTextPosition = (id) => {
@@ -107,7 +105,8 @@ export default function HomePage() {
         ctx.restore();
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Simulate processing delay
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       const processedImageDataUrl = canvas.toDataURL('image/png');
 
@@ -123,8 +122,6 @@ export default function HomePage() {
 
       setProcessedImages((prev) => [processedImage, ...prev]);
       setIsProcessing(false);
-      setTextPositions([]);
-      setSelectedTextId(null);
     };
 
     img.src = uploadedImage;
@@ -137,8 +134,8 @@ export default function HomePage() {
       <main className="relative">
         <HeroSection />
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-          <div className="grid lg:grid-cols-2 gap-12 items-start">
+        <div className="px-4 py-20 mx-auto max-w-7xl sm:px-6 lg:px-8">
+          <div className="grid items-start gap-12 lg:grid-cols-2">
             <div className="space-y-8">
               <UploadSection onImageUpload={handleImageUpload} uploadedImage={uploadedImage} />
               <AIModelSelector
@@ -164,7 +161,10 @@ export default function HomePage() {
           </div>
         </div>
 
-        <GallerySection processedImages={processedImages} />
+        {/* Gallery Section */}
+        <section className="px-4 pb-20 mx-auto mt-10 max-w-7xl sm:px-6 lg:px-8">
+          <GallerySection processedImages={processedImages} />
+        </section>
       </main>
 
       <FooterSection />
